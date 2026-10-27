@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>WildMorph - 動物ハイブリッド・カメラ</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Phosphor Icons for modern mobile UI -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=M+PLUS+Rounded+1c:wght@500;700;800&display=swap');
+    
+    body {
+      font-family: 'M PLUS Rounded 1c', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      background-color: #0b0f17;
+    }
+
+    /* Custom scrollbar for horizontal animal selector */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    /* Range slider styling */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 9999px;
+      height: 6px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 20px;
+      width: 20px;
+      border-radius: 50%;
+      background: #10b981;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+      border: 2px solid #ffffff;
+    }
+
+    /* Shutter ring animation */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.05); opacity: 0.4; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .animate-pulse-ring {
+      animation: pulse-ring 2.5s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="text-white min-h-screen flex flex-col justify-between overflow-x-hidden safe-area-inset">
+
+  <!-- Top Navigation & Status Bar -->
+  <header class="w-full bg-slate-900/80 backdrop-blur-md px-4 py-3 flex items-center justify-between border-b border-emerald-500/20 z-30 sticky top-0">
+    <div class="flex items-center space-x-2">
+      <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-300 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+        <i class="ph-bold ph-paw-print text-slate-950 text-lg"></i>
+      </div>
+      <div>
+        <h1 class="text-base font-extrabold tracking-wide bg-gradient-to-r from-emerald-400 via-teal-200 to-cyan-400 bg-clip-text text-transparent">
+          WildMorph
+        </h1>
+        <p class="text-[10px] text-emerald-400/80 font-medium tracking-tight">AI風・動物キメラカメラ (無料・即時生成)</p>
+      </div>
+    </div>
+
+    <!-- Quick action buttons -->
+    <div class="flex items-center space-x-2">
+      <button id="switchCameraBtn" title="カメラ反転" class="p-2 rounded-xl bg-slate-800 border border-slate-700 active:scale-95 transition-all text-slate-300 hover:text-emerald-400 hover:border-emerald-500/40">
+        <i class="ph-bold ph-camera-rotate text-lg"></i>
+      </button>
+      <label for="fileUploadInput" title="画像アップロード" class="p-2 rounded-xl bg-slate-800 border border-slate-700 active:scale-95 transition-all cursor-pointer text-slate-300 hover:text-emerald-400 hover:border-emerald-500/40">
+        <i class="ph-bold ph-image text-lg"></i>
+        <input type="file" id="fileUploadInput" accept="image/*" class="hidden">
+      </label>
+    </div>
+  </header>
+
+  <!-- Main Viewport / Viewfinder -->
+  <main class="relative flex-1 flex items-center justify-center w-full max-w-md mx-auto p-3">
+    <!-- Viewfinder Container -->
+    <div class="relative w-full aspect-[3/4] max-h-[68vh] rounded-3xl overflow-hidden shadow-2xl shadow-emerald-950/40 border border-slate-700/60 bg-slate-950 flex items-center justify-center">
+      
+      <!-- Hidden live video element -->
+      <video id="webcam" playsinline autoplay muted class="hidden"></video>
+      
+      <!-- Offscreen processing canvases -->
+      <canvas id="sourceCanvas" class="hidden"></canvas>
+      <canvas id="animalCanvas" class="hidden"></canvas>
+
+      <!-- Main Interactive Display Canvas -->
+      <canvas id="displayCanvas" class="w-full h-full object-cover rounded-3xl"></canvas>
+
+      <!-- Grid Overlay Guides for Selfie Alignment -->
+      <div id="faceGuide" class="absolute inset-0 pointer-events-none flex items-center justify-center transition-opacity duration-300">
+        <div class="w-48 h-64 border-2 border-dashed border-emerald-400/30 rounded-[50%] flex items-center justify-center">
+          <div class="w-full border-t border-emerald-400/15"></div>
+        </div>
+      </div>
+
+      <!-- Mode badge on viewfinder -->
+      <div class="absolute top-3 left-3 bg-slate-950/80 backdrop-blur-md px-2.5 py-1 rounded-full border border-slate-700/60 text-[11px] font-bold text-emerald-300 flex items-center space-x-1 shadow-md">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span id="activeModeBadge">スプリット融合</span>
+      </div>
+
+      <!-- Retake floating button (Shown in Captured mode) -->
+      <button id="retakeBtn" class="hidden absolute top-3 right-3 bg-red-950/80 backdrop-blur-md text-red-300 border border-red-500/40 px-3 py-1.5 rounded-full text-xs font-bold items-center space-x-1 shadow-lg active:scale-95 transition-all">
+        <i class="ph-bold ph-arrow-counter-clockwise"></i>
+        <span>撮り直す</span>
+      </button>
+
+      <!-- Split Divider handle (Interactive in Split Mode) -->
+      <div id="splitHandle" class="absolute top-0 bottom-0 w-1 bg-gradient-to-b from-emerald-400 via-teal-300 to-emerald-500 shadow-[0_0_12px_rgba(52,211,153,0.8)] cursor-ew-resize hidden pointer-events-auto">
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-slate-900 border-2 border-emerald-400 flex items-center justify-center shadow-lg text-emerald-400 text-xs">
+          <i class="ph-bold ph-arrows-left-right"></i>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom Interactive Dashboard -->
+  <footer class="w-full max-w-md mx-auto bg-slate-900/90 backdrop-blur-xl border-t border-slate-800 rounded-t-3xl pt-2 pb-5 px-4 shadow-2xl z-20">
+    
+    <!-- 1. Animal Category Selector -->
+    <div class="mb-2">
+      <div class="text-[11px] font-bold text-slate-400 mb-1.5 flex items-center justify-between px-1">
+        <span class="flex items-center gap-1"><i class="ph-bold ph-paw-print text-emerald-400"></i> 融合する動物を選択</span>
+        <span id="selectedAnimalName" class="text-emerald-400 font-extrabold text-xs">フクロモモンガ</span>
+      </div>
+      <div class="flex space-x-2.5 overflow-x-auto no-scrollbar py-1 px-0.5" id="animalSelectorList">
+        <!-- Animal buttons injected dynamically by JS -->
+      </div>
+    </div>
+
+    <!-- 2. Fusion Mode Selector Tabs -->
+    <div class="grid grid-cols-3 gap-1.5 p-1 bg-slate-950/70 rounded-2xl border border-slate-800 mb-2.5">
+      <button data-mode="split" class="mode-tab active py-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center gap-0.5 bg-emerald-500 text-slate-950 shadow-md">
+        <i class="ph-bold ph-columns text-sm"></i>
+        <span>左右スプリット</span>
+      </button>
+      <button data-mode="blend" class="mode-tab py-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center gap-0.5 text-slate-300 hover:text-white">
+        <i class="ph-bold ph-sparkle text-sm"></i>
+        <span>キメラ・融合</span>
+      </button>
+      <button data-mode="parts" class="mode-tab py-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center gap-0.5 text-slate-300 hover:text-white">
+        <i class="ph-bold ph-mask-happy text-sm"></i>
+        <span>パーツ変身</span>
+      </button>
+    </div>
+
+    <!-- 3. Dynamic Fine-tune Sliders -->
+    <div class="bg-slate-950/50 p-2.5 rounded-2xl border border-slate-800/80 mb-3 space-y-2">
+      <div class="flex items-center justify-between text-xs font-semibold text-slate-300">
+        <span id="slider1Label" class="flex items-center gap-1"><i class="ph-bold ph-sliders text-emerald-400"></i> 分割位置</span>
+        <span id="slider1Val" class="text-emerald-400 font-bold">50%</span>
+      </div>
+      <input type="range" id="primarySlider" min="0" max="100" value="50" class="w-full">
+
+      <!-- Secondary adjustment: Blend Softness / Animal Size -->
+      <div class="flex items-center justify-between text-xs font-semibold text-slate-300">
+        <span id="slider2Label" class="flex items-center gap-1"><i class="ph-bold ph-feather text-emerald-400"></i> 境界グラデーション</span>
+        <span id="slider2Val" class="text-emerald-400 font-bold">35%</span>
+      </div>
+      <input type="range" id="secondarySlider" min="0" max="100" value="35" class="w-full">
+    </div>
+
+    <!-- 4. Action Controls: Shutter / Download -->
+    <div class="flex items-center justify-center space-x-6">
+      
+      <!-- Reset Adjustment Button -->
+      <button id="resetAdjustBtn" title="位置を初期化" class="w-12 h-12 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center active:scale-90 transition-all hover:text-emerald-400">
+        <i class="ph-bold ph-arrows-counter-clockwise text-xl"></i>
+      </button>
+
+      <!-- Main Action: Capture or Save -->
+      <div class="relative flex items-center justify-center">
+        <!-- Pulse ring behind capture button -->
+        <div id="shutterRing" class="absolute w-20 h-20 rounded-full border-2 border-emerald-400/40 animate-pulse-ring pointer-events-none"></div>
+        
+        <button id="actionBtn" class="relative w-16 h-16 rounded-full bg-gradient-to-tr from-emerald-500 via-teal-400 to-emerald-300 text-slate-950 flex items-center justify-center shadow-xl shadow-emerald-500/40 active:scale-95 transition-transform duration-150">
+          <i id="actionBtnIcon" class="ph-bold ph-camera text-2xl"></i>
+        </button>
+      </div>
+
+      <!-- Save / Download button -->
+      <button id="saveBtn" title="写真を保存" class="w-12 h-12 rounded-2xl bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center active:scale-90 transition-all hover:text-emerald-400">
+        <i class="ph-bold ph-download-simple text-xl"></i>
+      </button>
+    </div>
+  </footer>
+
+  <!-- Notification Toast message box -->
+  <div id="toast" class="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900/95 text-emerald-300 border border-emerald-500/50 px-4 py-2 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 pointer-events-none opacity-0 transition-opacity duration-300 z-50">
+    <i class="ph-bold ph-check-circle text-emerald-400 text-base"></i>
+    <span id="toastMsg">通知メッセージ</span>
+  </div>
+
+  <script>
+    /**
+     * WildMorph - Standalone Hybrid Animal Canvas App
+     * Uses zero external APIs. High performance procedural vector graphics + Web Audio.
+     */
+
+    // --- Sound Synthesis using Web Audio API (No external assets required) ---
+    const AudioEngine = {
+      ctx: null,
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioContext();
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      },
+      playClick() {
+        try {
+          this.init();
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(300, this.ctx.currentTime + 0.05);
+          gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+          gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.05);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.05);
+        } catch(e) {}
+      },
+      playShutter() {
+        try {
+          this.init();
+          // Shutter click & release simulation
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(140, now);
+          osc.frequency.exponentialRampToValueAtTime(40, now + 0.08);
+          gain.gain.setValueAtTime(0.3, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.09);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.1);
+        } catch(e) {}
+      },
+      playSuccess() {
+        try {
+          this.init();
+          const now = this.ctx.currentTime;
+          [523.25, 659.25, 783.99].forEach((freq, idx) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+            gain.gain.setValueAtTime(0.15, now + idx * 0.08);
+            gain.gain.linearRampToValueAtTime(0.01, now + idx * 0.08 + 0.12);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now + idx * 0.08);
+            osc.stop(now + idx * 0.08 + 0.14);
+          });
+        } catch(e) {}
+      }
+    };
+
+    // --- Animal Definitions & Procedural SVG Face Generation ---
+    const ANIMALS = {
+      sugarGlider: {
+        id: 'sugarGlider',
+        name: 'フクロモモンガ',
+        icon: 'ph-paw-print',
+        color: '#f3c4fb',
+        desc: '大きな愛らしい夜行性の瞳と丸い耳',
+        drawFeatures(ctx, w, h) {
+          ctx.save();
+          // Center origin
+          const cx = w * 0.5;
+          const cy = h * 0.5;
+          
+          // Outer Soft Fur Halo
+          const gradFur = ctx.createRadialGradient(cx, cy, w * 0.1, cx, cy, w * 0.45);
+          gradFur.addColorStop(0, '#5a5e6b');
+          gradFur.addColorStop(0.7, '#2f3440');
+          gradFur.addColorStop(1, '#1b1d24');
+          ctx.fillStyle = gradFur;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy + h * 0.02, w * 0.38, h * 0.42, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Black Dorsal stripe on forehead
+          ctx.fillStyle = '#111217';
+          ctx.beginPath();
+          ctx.moveTo(cx - w * 0.05, cy - h * 0.35);
+          ctx.lineTo(cx + w * 0.05, cy - h * 0.35);
+          ctx.lineTo(cx + w * 0.02, cy + h * 0.08);
+          ctx.lineTo(cx - w * 0.02, cy + h * 0.08);
+          ctx.closePath();
+          ctx.fill();
+
+          // Round Ears
+          [-1, 1].forEach(side => {
+            ctx.save();
+            ctx.translate(cx + side * w * 0.32, cy - h * 0.28);
+            ctx.rotate(side * 0.25);
+            ctx.fillStyle = '#262933';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, w * 0.14, h * 0.15, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // Ear inner pink
+            ctx.fillStyle = '#e89db7';
+            ctx.beginPath();
+            ctx.ellipse(side * -w * 0.02, 0, w * 0.09, h * 0.11, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          });
+
+          // Giant Nocturnal Glossy Eyes
+          [-1, 1].forEach(side => {
+            const ex = cx + side * w * 0.18;
+            const ey = cy - h * 0.03;
+            const eyeR = w * 0.11;
+            
+            // Eye socket dark ring
+            ctx.fillStyle = '#0a0b0d';
+            ctx.beginPath();
+            ctx.arc(ex, ey, eyeR * 1.15, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Iris deep amber brown
+            const irisGrad = ctx.createRadialGradient(ex, ey, 2, ex, ey, eyeR);
+            irisGrad.addColorStop(0, '#2b1b11');
+            irisGrad.addColorStop(0.7, '#110b06');
+            irisGrad.addColorStop(1, '#000000');
+            ctx.fillStyle = irisGrad;
+            ctx.beginPath();
+            ctx.arc(ex, ey, eyeR, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Catchlight highlights
+            ctx.fillStyle = 'rgba(255,255,255,0.92)';
+            ctx.beginPath();
+            ctx.arc(ex - eyeR * 0.3, ey - eyeR * 0.3, eyeR * 0.32, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(ex + eyeR * 0.25, ey + eyeR * 0.25, eyeR * 0.15, 0, Math.PI * 2);
+            ctx.fill();
+          });
+
+          // Cute pink button nose
+          ctx.fillStyle = '#fca5a5';
+          ctx.beginPath();
+          ctx.ellipse(cx, cy + h * 0.13, w * 0.04, h * 0.028, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Delicate whiskers
+          ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+          ctx.lineWidth = 1.6;
+          [-1, 1].forEach(side => {
+            for (let i = -1; i <= 1; i++) {
+              ctx.beginPath();
+              ctx.moveTo(cx + side * w * 0.06, cy + h * 0.14 + i * 5);
+              ctx.quadraticCurveTo(
+                cx + side * w * 0.25, cy + h * 0.13 + i * 15,
+                cx + side * w * 0.42, cy + h * 0.16 + i * 25
+              );
+              ctx.stroke();
+            }
+          });
+
+          ctx.restore();
+        }
+      },
+
+      wolf: {
+        id: 'wolf',
+        name: '孤高のオオカミ',
+        icon: 'ph-shield-warning',
+        color: '#94a3b8',
+        desc: '鋭い金色の瞳、精悍なマズルと尖った耳',
+        drawFeatures(ctx, w, h) {
+          ctx.save();
+          const cx = w * 0.5;
+          const cy = h * 0.5;
+
+          // Wild silver-grey fur texture
+          const furGrad = ctx.createLinearGradient(0, cy - h*0.4, 0, cy + h*0.4);
+          furGrad.addColorStop(0, '#334155');
+          furGrad.addColorStop(0.5, '#475569');
+          furGrad.addColorStop(1, '#1e293b');
+          ctx.fillStyle = furGrad;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, w * 0.36, h * 0.44, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Pointed Wolf Ears
+          [-1, 1].forEach(side => {
+            ctx.save();
+            ctx.translate(cx + side * w * 0.28, cy - h * 0.3);
+            ctx.fillStyle = '#1e293b';
+            ctx.beginPath();
+            ctx.moveTo(0, h * 0.1);
+            ctx.lineTo(-side * w * 0.1, -h * 0.15);
+            ctx.lineTo(side * w * 0.12, 0);
+            ctx.closePath();
+            ctx.fill();
+            // Ear tuft
+            ctx.fillStyle = '#cbd5e1';
+            ctx.beginPath();
+            ctx.moveTo(0, h * 0.06);
+            ctx.lineTo(-side * w * 0.06, -h * 0.09);
+            ctx.lineTo(side * w * 0.08, 0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          });
+
+          // Piercing Amber/Golden Predator Eyes
+          [-1, 1].forEach(side => {
+            const ex = cx + side * w * 0.17;
+            const ey = cy - h * 0.06;
+            ctx.save();
+            ctx.translate(ex, ey);
+            ctx.rotate(side * 0.18);
+
+            // Almond beast eye outline
+            ctx.fillStyle = '#0f172a';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, w * 0.095, h * 0.055, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Glowing Amber Iris
+            const eyeGrad = ctx.createRadialGradient(0, 0, 2, 0, 0, w * 0.07);
+            eyeGrad.addColorStop(0, '#fef08a');
+            eyeGrad.addColorStop(0.6, '#eab308');
+            eyeGrad.addColorStop(1, '#854d0e');
+            ctx.fillStyle = eyeGrad;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, w * 0.075, h * 0.045, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Slit Predator Pupil
+            ctx.fillStyle = '#05070a';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, w * 0.025, h * 0.04, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Gloss shine
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.beginPath();
+            ctx.arc(-w * 0.02, -h * 0.012, 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          });
+
+          // Strong Snout and Dark Nose
+          ctx.fillStyle = '#0f172a';
+          ctx.beginPath();
+          ctx.moveTo(cx - w * 0.06, cy + h * 0.12);
+          ctx.lineTo(cx + w * 0.06, cy + h * 0.12);
+          ctx.lineTo(cx + w * 0.04, cy + h * 0.17);
+          ctx.lineTo(cx, cy + h * 0.19);
+          ctx.lineTo(cx - w * 0.04, cy + h * 0.17);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.restore();
+        }
+      },
+
+      leopard: {
+        id: 'leopard',
+        name: 'ユキヒョウ / ネコ',
+        icon: 'ph-cat',
+        color: '#38bdf8',
+        desc: '神秘的な青緑の瞳、ヒョウ柄ロゼット紋様と毛並み',
+        drawFeatures(ctx, w, h) {
+          ctx.save();
+          const cx = w * 0.5;
+          const cy = h * 0.5;
+
+          // Soft snow feline face base
+          const snowGrad = ctx.createRadialGradient(cx, cy, w * 0.1, cx, cy, w * 0.4);
+          snowGrad.addColorStop(0, '#e2e8f0');
+          snowGrad.addColorStop(0.6, '#cbd5e1');
+          snowGrad.addColorStop(1, '#94a3b8');
+          ctx.fillStyle = snowGrad;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, w * 0.35, h * 0.42, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Feline Ears with dark outer rim
+          [-1, 1].forEach(side => {
+            ctx.save();
+            ctx.translate(cx + side * w * 0.25, cy - h * 0.28);
+            ctx.rotate(side * 0.15);
+            ctx.fillStyle = '#1e293b';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, w * 0.12, h * 0.13, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#f1f5f9';
+            ctx.beginPath();
+            ctx.ellipse(side * -w * 0.02, 0, w * 0.08, h * 0.09, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          });
+
+          // Snow Leopard Rosettes (Procedural Spots)
+          const spots = [
+            { x: -0.22, y: -0.15, r: 12 }, { x: 0.22, y: -0.15, r: 12 },
+            { x: -0.12, y: -0.24, r: 10 }, { x: 0.12, y: -0.24, r: 10 },
+            { x: 0.0, y: -0.27, r: 8 },
+            { x: -0.25, y: 0.05, r: 14 }, { x: 0.25, y: 0.05, r: 14 }
+          ];
+          ctx.fillStyle = '#334155';
+          spots.forEach(sp => {
+            ctx.beginPath();
+            ctx.arc(cx + sp.x * w, cy + sp.y * h, sp.r, 0, Math.PI * 2);
+            ctx.fill();
+            // hollow inner ring
+            ctx.fillStyle = '#cbd5e1';
+            ctx.beginPath();
+            ctx.arc(cx + sp.x * w + 1, cy + sp.y * h + 1, sp.r * 0.45, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#334155';
+          });
+
+          // Hypnotic Cyan / Aqua Feline Eyes
+          [-1, 1].forEach(side => {
+            const ex = cx + side * w * 0.16;
+            const ey = cy - h * 0.04;
+            ctx.save();
+            ctx.translate(ex, ey);
+            ctx.rotate(side * 0.12);
+
+            ctx.fillStyle = '#0f172a';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, w * 0.085, h * 0.05, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            const eyeGrad = ctx.createRadialGradient(0, 0, 2, 0, 0, w * 0.065);
+            eyeGrad.addColorStop(0, '#67e8f9');
+            eyeGrad.addColorStop(0.7, '#0891b2');
+            eyeGrad.addColorStop(1, '#155e75');
+            ctx.fillStyle = eyeGrad;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, w * 0.065, h * 0.04, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Slit pupil
+            ctx.fillStyle = '#020617';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, w * 0.015, h * 0.038, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.beginPath();
+            ctx.arc(-w * 0.02, -h * 0.01, 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          });
+
+          // Leather nose & long whiskers
+          ctx.fillStyle = '#fda4af';
+          ctx.beginPath();
+          ctx.moveTo(cx - w * 0.045, cy + h * 0.11);
+          ctx.lineTo(cx + w * 0.045, cy + h * 0.11);
+          ctx.lineTo(cx, cy + h * 0.15);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+          ctx.lineWidth = 1.8;
+          [-1, 1].forEach(side => {
+            for (let i = 0; i < 3; i++) {
+              ctx.beginPath();
+              ctx.moveTo(cx + side * w * 0.05, cy + h * 0.13 + i * 4);
+              ctx.lineTo(cx + side * w * 0.42, cy + h * 0.15 + i * 14);
+              ctx.stroke();
+            }
+          });
+
+          ctx.restore();
+        }
+      },
+
+      lion: {
+        id: 'lion',
+        name: '百獣の王ライオン',
+        icon: 'ph-crown',
+        color: '#f59e0b',
+        desc: '威風堂々たる豊かなタテガミと野性味あふれる金眼',
+        drawFeatures(ctx, w, h) {
+          ctx.save();
+          const cx = w * 0.5;
+          const cy = h * 0.5;
+
+          // Huge Wild Mane halo
+          const maneGrad = ctx.createRadialGradient(cx, cy, w * 0.2, cx, cy, w * 0.5);
+          maneGrad.addColorStop(0, '#b45309');
+          maneGrad.addColorStop(0.5, '#78350f');
+          maneGrad.addColorStop(1, '#451a03');
+          ctx.fillStyle = maneGrad;
+
+          // Spiky Mane silhouette
+          ctx.beginPath();
+          const spikes = 28;
+          for (let i = 0; i < spikes; i++) {
+            const angle = (i / spikes) * Math.PI * 2;
+            const r = (i % 2 === 0 ? w * 0.48 : w * 0.40);
+            const x = cx + Math.cos(angle) * r;
+            const y = cy + Math.sin(angle) * (r * 1.08);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          ctx.fill();
+
+          // Tawny Face
+          const faceGrad = ctx.createRadialGradient(cx, cy, w * 0.05, cx, cy, w * 0.32);
+          faceGrad.addColorStop(0, '#fde68a');
+          faceGrad.addColorStop(0.8, '#d97706');
+          faceGrad.addColorStop(1, '#b45309');
+          ctx.fillStyle = faceGrad;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, w * 0.28, h * 0.36, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Deep Wild Golden Eyes
+          [-1, 1].forEach(side => {
+            const ex = cx + side * w * 0.14;
+            const ey = cy - h * 0.05;
+            ctx.fillStyle = '#291203';
+            ctx.beginPath();
+            ctx.ellipse(ex, ey, w * 0.075, h * 0.05, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            const eyeGrad = ctx.createRadialGradient(ex, ey, 2, ex, ey, w * 0.055);
+            eyeGrad.addColorStop(0, '#fbbf24');
+            eyeGrad.addColorStop(0.8, '#b45309');
+            eyeGrad.addColorStop(1, '#000000');
+            ctx.fillStyle = eyeGrad;
+            ctx.beginPath();
+            ctx.ellipse(ex, ey, w * 0.058, h * 0.038, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Pupil
+            ctx.fillStyle = '#050403';
+            ctx.beginPath();
+            ctx.ellipse(ex, ey, w * 0.02, h * 0.035, 0, 0, Math.PI * 2);
+            ctx.fill();
+          });
+
+          // Broad Black Feline Nose
+          ctx.fillStyle = '#1c1917';
+          ctx.beginPath();
+          ctx.moveTo(cx - w * 0.065, cy + h * 0.12);
+          ctx.lineTo(cx + w * 0.065, cy + h * 0.12);
+          ctx.lineTo(cx, cy + h * 0.18);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.restore();
+        }
+      },
+
+      owl: {
+        id: 'owl',
+        name: '夜の賢者フクロウ',
+        icon: 'ph-feather',
+        color: '#a855f7',
+        desc: '巨大な真円の黄金眼、羽角と精緻なくちばし',
+        drawFeatures(ctx, w, h) {
+          ctx.save();
+          const cx = w * 0.5;
+          const cy = h * 0.5;
+
+          // Feather facial disk
+          const diskGrad = ctx.createRadialGradient(cx, cy, w * 0.1, cx, cy, w * 0.42);
+          diskGrad.addColorStop(0, '#f5ebe0');
+          diskGrad.addColorStop(0.6, '#d5bdaf');
+          diskGrad.addColorStop(1, '#6b4f3a');
+          ctx.fillStyle = diskGrad;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, w * 0.38, h * 0.44, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Feather Tuft Horns (Ear tufts)
+          [-1, 1].forEach(side => {
+            ctx.fillStyle = '#4a3525';
+            ctx.beginPath();
+            ctx.moveTo(cx + side * w * 0.15, cy - h * 0.28);
+            ctx.lineTo(cx + side * w * 0.32, cy - h * 0.42);
+            ctx.lineTo(cx + side * w * 0.32, cy - h * 0.24);
+            ctx.closePath();
+            ctx.fill();
+          });
+
+          // Giant Round Owl Eyes with Mask Disc
+          [-1, 1].forEach(side => {
+            const ex = cx + side * w * 0.17;
+            const ey = cy - h * 0.03;
+            const eyeR = w * 0.125;
+
+            // Outer feathered dark disc
+            ctx.fillStyle = '#2d2016';
+            ctx.beginPath();
+            ctx.arc(ex, ey, eyeR * 1.25, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Glowing Solar Amber Iris
+            const eyeGrad = ctx.createRadialGradient(ex, ey, 2, ex, ey, eyeR);
+            eyeGrad.addColorStop(0, '#fde047');
+            eyeGrad.addColorStop(0.7, '#eab308');
+            eyeGrad.addColorStop(1, '#ca8a04');
+            ctx.fillStyle = eyeGrad;
+            ctx.beginPath();
+            ctx.arc(ex, ey, eyeR, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Huge nocturnal pupil
+            ctx.fillStyle = '#090806';
+            ctx.beginPath();
+            ctx.arc(ex, ey, eyeR * 0.65, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Crisp glass reflection
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.beginPath();
+            ctx.arc(ex - eyeR * 0.25, ey - eyeR * 0.25, eyeR * 0.22, 0, Math.PI * 2);
+            ctx.fill();
+          });
+
+          // Hooked Predator Beak
+          ctx.fillStyle = '#292524';
+          ctx.beginPath();
+          ctx.moveTo(cx - w * 0.035, cy + h * 0.06);
+          ctx.lineTo(cx + w * 0.035, cy + h * 0.06);
+          ctx.lineTo(cx, cy + h * 0.19);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.restore();
+        }
+      }
+    };
+
+    // --- State Management ---
+    const state = {
+      stream: null,
+      facingMode: 'user', // front camera by default
+      isCaptured: false,
+      userImage: null, // Image element when captured/uploaded
+      selectedAnimal: 'sugarGlider',
+      mode: 'split', // 'split', 'blend', 'parts'
+      slider1: 50, // Split Position / Blend Opacity / Scale
+      slider2: 35, // Feather Width / Tint / Y-Offset
+      isDraggingSplit: false
+    };
+
+    // --- DOM Elements ---
+    const webcam = document.getElementById('webcam');
+    const displayCanvas = document.getElementById('displayCanvas');
+    const sourceCanvas = document.getElementById('sourceCanvas');
+    const animalCanvas = document.getElementById('animalCanvas');
+    const displayCtx = displayCanvas.getContext('2d');
+    const sourceCtx = sourceCanvas.getContext('2d');
+    const animalCtx = animalCanvas.getContext('2d');
+
+    const switchCameraBtn = document.getElementById('switchCameraBtn');
+    const fileUploadInput = document.getElementById('fileUploadInput');
+    const actionBtn = document.getElementById('actionBtn');
+    const actionBtnIcon = document.getElementById('actionBtnIcon');
+    const shutterRing = document.getElementById('shutterRing');
+    const retakeBtn = document.getElementById('retakeBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const resetAdjustBtn = document.getElementById('resetAdjustBtn');
+    const splitHandle = document.getElementById('splitHandle');
+    const faceGuide = document.getElementById('faceGuide');
+    const activeModeBadge = document.getElementById('activeModeBadge');
+    const selectedAnimalName = document.getElementById('selectedAnimalName');
+    const animalSelectorList = document.getElementById('animalSelectorList');
+    const primarySlider = document.getElementById('primarySlider');
+    const secondarySlider = document.getElementById('secondarySlider');
+    const slider1Label = document.getElementById('slider1Label');
+    const slider1Val = document.getElementById('slider1Val');
+    const slider2Label = document.getElementById('slider2Label');
+    const slider2Val = document.getElementById('slider2Val');
+    const toast = document.getElementById('toast');
+    const toastMsg = document.getElementById('toastMsg');
+
+    // --- Toast Notification Helper ---
+    function showToast(message, icon = 'ph-check-circle') {
+      toastMsg.innerText = message;
+      toast.classList.remove('opacity-0');
+      toast.classList.add('opacity-100');
+      setTimeout(() => {
+        toast.classList.remove('opacity-100');
+        toast.classList.add('opacity-0');
+      }, 2400);
+    }
+
+    // --- Camera Initialization ---
+    async function initCamera() {
+      if (state.stream) {
+        state.stream.getTracks().forEach(track => track.stop());
+      }
+      try {
+        const constraints = {
+          audio: false,
+          video: {
+            facingMode: state.facingMode,
+            width: { ideal: 1080 },
+            height: { ideal: 1440 }
+          }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        state.stream = stream;
+        webcam.srcObject = stream;
+        await webcam.play();
+        showToast('カメラが接続されました');
+      } catch (err) {
+        console.warn('カメラアクセス不許可または利用不可:', err);
+        showToast('カメラの起動に失敗しました。画像アップロードをご利用ください');
+        // Render dummy preview face if camera denied
+        createFallbackFace();
+      }
+    }
+
+    // Create a stylish portrait silhouette placeholder if camera permission is denied
+    function createFallbackFace() {
+      const w = 720, h = 960;
+      sourceCanvas.width = w;
+      sourceCanvas.height = h;
+      const ctx = sourceCtx;
+      const grad = ctx.createLinearGradient(0, 0, w, h);
+      grad.addColorStop(0, '#1e293b');
+      grad.addColorStop(1, '#0f172a');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+
+      // Stylized human head sketch
+      ctx.fillStyle = '#334155';
+      ctx.beginPath();
+      ctx.ellipse(w/2, h/2 - 50, 160, 210, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(w/2, h/2 + 250, 240, 180, 0, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = 'bold 26px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('右上のボタンから写真をアップロード', w/2, h/2 + 30);
+      
+      state.isCaptured = true;
+      state.userImage = sourceCanvas;
+      updateUIState();
+    }
+
+    // Switch Front / Back Camera
+    switchCameraBtn.addEventListener('click', () => {
+      AudioEngine.playClick();
+      state.facingMode = (state.facingMode === 'user') ? 'environment' : 'user';
+      state.isCaptured = false;
+      state.userImage = null;
+      updateUIState();
+      initCamera();
+    });
+
+    // Local Photo File Upload Handler
+    fileUploadInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      AudioEngine.playClick();
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          state.userImage = img;
+          state.isCaptured = true;
+          updateUIState();
+          AudioEngine.playSuccess();
+          showToast('写真を読み込みました！');
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // --- Populate Animal Thumbnails ---
+    function renderAnimalButtons() {
+      animalSelectorList.innerHTML = '';
+      Object.keys(ANIMALS).forEach((key) => {
+        const anim = ANIMALS[key];
+        const isSelected = (state.selectedAnimal === key);
+        
+        const btn = document.createElement('button');
+        btn.className = `flex-shrink-0 flex items-center space-x-2 px-3 py-2 rounded-2xl border transition-all active:scale-95 ${
+          isSelected 
+            ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300 shadow-md shadow-emerald-500/20 font-bold'
+            : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:border-slate-600'
+        }`;
+        btn.innerHTML = `
+          <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs" style="background:${anim.color}25; color:${anim.color}">
+            <i class="ph-bold ${anim.icon}"></i>
+          </div>
+          <span class="text-xs tracking-tight">${anim.name}</span>
+        `;
+        btn.addEventListener('click', () => {
+          AudioEngine.playClick();
+          state.selectedAnimal = key;
+          selectedAnimalName.innerText = anim.name;
+          renderAnimalButtons();
+        });
+        animalSelectorList.appendChild(btn);
+      });
+    }
+
+    // --- Mode Tab Switching ---
+    document.querySelectorAll('.mode-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        AudioEngine.playClick();
+        document.querySelectorAll('.mode-tab').forEach(t => {
+          t.classList.remove('bg-emerald-500', 'text-slate-950', 'shadow-md');
+          t.classList.add('text-slate-300');
+        });
+        tab.classList.add('bg-emerald-500', 'text-slate-950', 'shadow-md');
+        tab.classList.remove('text-slate-300');
+
+        state.mode = tab.dataset.mode;
+        updateSliderLabels();
+      });
+    });
+
+    function updateSliderLabels() {
+      if (state.mode === 'split') {
+        activeModeBadge.innerText = '左右スプリット融合';
+        slider1Label.innerHTML = '<i class="ph-bold ph-columns text-emerald-400"></i> 分割位置';
+        slider2Label.innerHTML = '<i class="ph-bold ph-feather text-emerald-400"></i> 境界グラデーション';
+        splitHandle.classList.remove('hidden');
+      } else if (state.mode === 'blend') {
+        activeModeBadge.innerText = 'キメラ・透明ブレンド';
+        slider1Label.innerHTML = '<i class="ph-bold ph-sparkle text-emerald-400"></i> 融合濃度 (オパシティ)';
+        slider2Label.innerHTML = '<i class="ph-bold ph-palette text-emerald-400"></i> コントラスト調和';
+        splitHandle.classList.add('hidden');
+      } else if (state.mode === 'parts') {
+        activeModeBadge.innerText = 'アニマルパーツ変身';
+        slider1Label.innerHTML = '<i class="ph-bold ph-arrows-out text-emerald-400"></i> パーツ拡大縮小';
+        slider2Label.innerHTML = '<i class="ph-bold ph-arrows-down-up text-emerald-400"></i> 上下位置調整';
+        splitHandle.classList.add('hidden');
+      }
+      updateSliderDisplayValues();
+    }
+
+    function updateSliderDisplayValues() {
+      slider1Val.innerText = `${Math.round(state.slider1)}%`;
+      slider2Val.innerText = `${Math.round(state.slider2)}%`;
+    }
+
+    primarySlider.addEventListener('input', (e) => {
+      state.slider1 = parseFloat(e.target.value);
+      updateSliderDisplayValues();
+    });
+
+    secondarySlider.addEventListener('input', (e) => {
+      state.slider2 = parseFloat(e.target.value);
+      updateSliderDisplayValues();
+    });
+
+    // Reset adjustments
+    resetAdjustBtn.addEventListener('click', () => {
+      AudioEngine.playClick();
+      state.slider1 = 50;
+      state.slider2 = 35;
+      primarySlider.value = 50;
+      secondarySlider.value = 35;
+      updateSliderDisplayValues();
+      showToast('調整値をリセットしました');
+    });
+
+    // --- Interactive Dragging for Split Handle ---
+    displayCanvas.parentElement.addEventListener('pointerdown', (e) => {
+      if (state.mode !== 'split') return;
+      const rect = displayCanvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const ratio = Math.max(0, Math.min(100, (clickX / rect.width) * 100));
+      // if click is near split position, allow drag
+      if (Math.abs(ratio - state.slider1) < 15) {
+        state.isDraggingSplit = true;
+      }
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!state.isDraggingSplit) return;
+      const rect = displayCanvas.getBoundingClientRect();
+      const posX = e.clientX - rect.left;
+      const ratio = Math.max(5, Math.min(95, (posX / rect.width) * 100));
+      state.slider1 = ratio;
+      primarySlider.value = ratio;
+      updateSliderDisplayValues();
+    });
+
+    window.addEventListener('pointerup', () => {
+      state.isDraggingSplit = false;
+    });
+
+    // --- Shutter / Capture Logic ---
+    actionBtn.addEventListener('click', () => {
+      if (!state.isCaptured) {
+        // Capture frame from webcam video stream
+        AudioEngine.playShutter();
+        captureCurrentFrame();
+        state.isCaptured = true;
+        updateUIState();
+        showToast('写真を撮影しました！');
+      } else {
+        // If already captured, trigger download directly
+        downloadFusedImage();
+      }
+    });
+
+    retakeBtn.addEventListener('click', () => {
+      AudioEngine.playClick();
+      state.isCaptured = false;
+      state.userImage = null;
+      updateUIState();
+      showToast('カメラ映像に戻りました');
+    });
+
+    saveBtn.addEventListener('click', () => {
+      downloadFusedImage();
+    });
+
+    function captureCurrentFrame() {
+      const vw = webcam.videoWidth || 720;
+      const vh = webcam.videoHeight || 960;
+      sourceCanvas.width = vw;
+      sourceCanvas.height = vh;
+
+      // Draw and horizontally flip selfie camera for natural mirror reflection
+      sourceCtx.save();
+      if (state.facingMode === 'user') {
+        sourceCtx.translate(vw, 0);
+        sourceCtx.scale(-1, 1);
+      }
+      sourceCtx.drawImage(webcam, 0, 0, vw, vh);
+      sourceCtx.restore();
+
+      const snap = new Image();
+      snap.src = sourceCanvas.toDataURL('image/png');
+      state.userImage = snap;
+    }
+
+    function updateUIState() {
+      if (state.isCaptured) {
+        retakeBtn.classList.remove('hidden');
+        retakeBtn.classList.add('flex');
+        faceGuide.classList.add('opacity-0');
+        shutterRing.classList.add('hidden');
+        actionBtnIcon.className = 'ph-bold ph-download-simple text-2xl';
+      } else {
+        retakeBtn.classList.add('hidden');
+        retakeBtn.classList.remove('flex');
+        faceGuide.classList.remove('opacity-0');
+        shutterRing.classList.remove('hidden');
+        actionBtnIcon.className = 'ph-bold ph-camera text-2xl';
+      }
+    }
+
+    // --- Download Canvas Fusion Result ---
+    function downloadFusedImage() {
+      AudioEngine.playSuccess();
+      const link = document.createElement('a');
+      const timeStamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+      link.download = `WildMorph_${state.selectedAnimal}_${timeStamp}.png`;
+      link.href = displayCanvas.toDataURL('image/png');
+      link.click();
+      showToast('アルバムに保存しました！');
+    }
+
+    // --- Core Canvas Render Loop ---
+    function renderLoop() {
+      requestAnimationFrame(renderLoop);
+
+      const targetW = 720;
+      const targetH = 960;
+
+      if (displayCanvas.width !== targetW || displayCanvas.height !== targetH) {
+        displayCanvas.width = targetW;
+        displayCanvas.height = targetH;
+        animalCanvas.width = targetW;
+        animalCanvas.height = targetH;
+      }
+
+      // 1. Draw User Selfie (Live video or Captured snapshot)
+      displayCtx.clearRect(0, 0, targetW, targetH);
+
+      if (state.isCaptured && state.userImage) {
+        displayCtx.drawImage(state.userImage, 0, 0, targetW, targetH);
+      } else if (webcam.readyState >= 2) {
+        displayCtx.save();
+        if (state.facingMode === 'user') {
+          displayCtx.translate(targetW, 0);
+          displayCtx.scale(-1, 1);
+        }
+        displayCtx.drawImage(webcam, 0, 0, targetW, targetH);
+        displayCtx.restore();
+      }
+
+      // 2. Render Animal Vector Artwork to Animal Canvas Buffer
+      animalCtx.clearRect(0, 0, targetW, targetH);
+      const animal = ANIMALS[state.selectedAnimal];
+      if (animal) {
+        animal.drawFeatures(animalCtx, targetW, targetH);
+      }
+
+      // 3. Composite according to selected Mode
+      if (state.mode === 'split') {
+        renderSplitMode(targetW, targetH);
+      } else if (state.mode === 'blend') {
+        renderBlendMode(targetW, targetH);
+      } else if (state.mode === 'parts') {
+        renderPartsMode(targetW, targetH);
+      }
+
+      // Update Split Handle visual position
+      if (state.mode === 'split') {
+        splitHandle.style.left = `${state.slider1}%`;
+      }
+    }
+
+    // Mode A: Split / Half-and-Half Morphing with Feathering
+    function renderSplitMode(w, h) {
+      const splitX = (state.slider1 / 100) * w;
+      const feather = (state.slider2 / 100) * (w * 0.25) + 2; // Feather width
+
+      // Create a gradient mask for smooth fusion edge
+      displayCtx.save();
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = w;
+      maskCanvas.height = h;
+      const maskCtx = maskCanvas.getContext('2d');
+
+      const splitGrad = maskCtx.createLinearGradient(splitX - feather, 0, splitX + feather, 0);
+      splitGrad.addColorStop(0, 'rgba(0,0,0,0)');
+      splitGrad.addColorStop(1, 'rgba(0,0,0,1)');
+      maskCtx.fillStyle = splitGrad;
+      maskCtx.fillRect(splitX - feather, 0, feather * 2, h);
+      maskCtx.fillStyle = 'rgba(0,0,0,1)';
+      maskCtx.fillRect(splitX + feather, 0, w - (splitX + feather), h);
+
+      // Mask the animal canvas
+      maskCtx.globalCompositeOperation = 'source-in';
+      maskCtx.drawImage(animalCanvas, 0, 0);
+
+      // Overlay seamlessly onto main display
+      displayCtx.drawImage(maskCanvas, 0, 0);
+      displayCtx.restore();
+    }
+
+    // Mode B: Chimera Overlay / Translucent Animal Blend
+    function renderBlendMode(w, h) {
+      displayCtx.save();
+      const opacity = state.slider1 / 100;
+      const contrast = 0.5 + (state.slider2 / 100);
+
+      displayCtx.globalAlpha = opacity;
+      displayCtx.globalCompositeOperation = 'screen';
+      displayCtx.filter = `contrast(${contrast})`;
+      displayCtx.drawImage(animalCanvas, 0, 0, w, h);
+
+      // Soft light accent layer for depth
+      displayCtx.globalAlpha = opacity * 0.45;
+      displayCtx.globalCompositeOperation = 'overlay';
+      displayCtx.drawImage(animalCanvas, 0, 0, w, h);
+
+      displayCtx.restore();
+    }
+
+    // Mode C: Parts Transformation (Stamp / Morph Scale & Position)
+    function renderPartsMode(w, h) {
+      displayCtx.save();
+      const scale = 0.6 + (state.slider1 / 100) * 0.8; // 0.6x to 1.4x scale
+      const offsetY = (state.slider2 - 50) * 3.5; // Up/down fine tune
+
+      displayCtx.translate(w / 2, h / 2 + offsetY);
+      displayCtx.scale(scale, scale);
+      displayCtx.translate(-w / 2, -h / 2);
+
+      // Blend edges naturally with human selfie
+      displayCtx.shadowColor = 'rgba(0,0,0,0.5)';
+      displayCtx.shadowBlur = 18;
+      displayCtx.drawImage(animalCanvas, 0, 0, w, h);
+      displayCtx.restore();
+    }
+
+    // --- App Bootstrapping ---
+    window.addEventListener('DOMContentLoaded', () => {
+      renderAnimalButtons();
+      updateSliderLabels();
+      initCamera();
+      renderLoop();
+    });
+  </script>
+</body>
+</html>
